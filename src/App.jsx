@@ -7,14 +7,9 @@ export default function App() {
   const [filterType, setFilterType] = useState('todos');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [productos, setProductos] = useState([]);
 
-  // Lista de productos cargados desde CSV
-  const [productos, setProductos] = useState([
-    { sku: 'SKU-1001', nombre: 'Ejemplo Producto A', stock: 25, min: 5, cat: 'General' },
-    { sku: 'SKU-1002', nombre: 'Ejemplo Producto B', stock: 3, min: 10, cat: 'Material' }
-  ]);
-
-  // Manejo de lectura de tu archivo CSV de Google Sheets
+  // Procesador inteligente del CSV de tu Google Sheet
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -22,16 +17,35 @@ export default function App() {
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
-          const parsedData = results.data.map((item, index) => ({
-            id: index + 1,
-            sku: item.SKU || item.Código || item.Codigo || `SKU-${index + 1}`,
-            nombre: item.Producto || item.Nombre || item.Descripción || 'Sin nombre',
-            stock: parseInt(item.Stock || item.Cantidad || item.Existencias || 0),
-            min: parseInt(item['Stock Mínimo'] || item.Minimo || 5),
-            cat: item.Categoría || item.Categoria || 'General'
-          }));
+          console.log("Datos del CSV:", results.data);
+          const parsedData = results.data.map((row, index) => {
+            // Obtener el valor buscando en varias posibles variaciones de nombres de columna
+            const keys = Object.keys(row);
+            const findValue = (possibleNames) => {
+              const matchedKey = keys.find(k => possibleNames.some(p => k.trim().toLowerCase().includes(p.toLowerCase())));
+              return matchedKey ? row[matchedKey] : null;
+            };
+
+            const skuVal = findValue(['sku', 'código', 'codigo', 'id', 'clave']) || `PROD-${index + 1}`;
+            const nombreVal = findValue(['producto', 'nombre', 'descripcion', 'descripción', 'artículo', 'articulo']) || `Producto ${index + 1}`;
+            const stockVal = parseInt(findValue(['stock', 'existencia', 'existencias', 'cantidad', 'saldo', 'total']) || 0);
+            const minVal = parseInt(findValue(['mínimo', 'minimo', 'min']) || 5);
+            const catVal = findValue(['categoría', 'categoria', 'departamento', 'familia']) || 'General';
+
+            return {
+              id: index + 1,
+              sku: String(skuVal),
+              nombre: String(nombreVal),
+              stock: isNaN(stockVal) ? 0 : stockVal,
+              min: isNaN(minVal) ? 5 : minVal,
+              cat: String(catVal)
+            };
+          });
+
           setProductos(parsedData);
-          if(parsedData.length > 0) setSelectedProduct(parsedData[0]);
+          if (parsedData.length > 0) {
+            setSelectedProduct(parsedData[0]);
+          }
         }
       });
     }
@@ -44,7 +58,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-100 font-sans text-slate-800">
-      {/* Sidebar Lateral Adaptado para iPad */}
+      {/* Sidebar Lateral para iPad */}
       <aside className="w-72 bg-slate-900 text-white flex flex-col p-6 justify-between shadow-xl">
         <div>
           <div className="flex items-center gap-3 mb-8">
@@ -61,7 +75,7 @@ export default function App() {
             <button 
               onClick={() => setActiveTab('catalogo')}
               className={`w-full text-left px-4 py-3 rounded-xl font-medium flex items-center gap-3 transition ${activeTab === 'catalogo' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-              <Layers size={20} /> Catálogo de Stock
+              <Layers size={20} /> Catálogo ({productos.length})
             </button>
             <button 
               onClick={() => setActiveTab('movimiento')}
@@ -76,10 +90,10 @@ export default function App() {
           </nav>
         </div>
 
-        {/* Carga Rápida de CSV de Google Sheets */}
+        {/* Cargar CSV */}
         <div className="bg-slate-800 p-4 rounded-xl border border-slate-700">
           <label className="text-xs text-slate-300 font-semibold mb-2 block flex items-center gap-2">
-            <Upload size={14} /> Cargar datos de Sheets (CSV)
+            <Upload size={14} /> Cargar CSV de Productos
           </label>
           <input 
             type="file" 
@@ -90,15 +104,14 @@ export default function App() {
         </div>
       </aside>
 
-      {/* Area de Trabajo Principal */}
+      {/* Panel Principal */}
       <main className="flex-1 overflow-hidden flex flex-col">
-        {/* Header Superior con Buscador */}
         <header className="bg-white border-b border-slate-200 px-8 py-4 flex justify-between items-center">
           <div className="relative w-96">
             <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
             <input 
               type="text" 
-              placeholder="Buscar por nombre o SKU de producto..." 
+              placeholder="Buscar por nombre o SKU..." 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -109,74 +122,81 @@ export default function App() {
           </div>
         </header>
 
-        {/* Vista del Catálogo en Split View iPad */}
         {activeTab === 'catalogo' && (
           <div className="flex-1 flex overflow-hidden p-6 gap-6">
-            {/* Lista de Productos (Izquierda) */}
-            <div className="w-1/2 overflow-y-auto space-y-3 pr-2">
-              {filteredProducts.map(p => (
-                <div 
-                  key={p.sku} 
-                  onClick={() => setSelectedProduct(p)}
-                  className={`p-4 rounded-2xl bg-white border transition cursor-pointer flex justify-between items-center ${selectedProduct?.sku === p.sku ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-md' : 'border-slate-200 hover:border-slate-300'}`}>
-                  <div>
-                    <span className="text-xs font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{p.sku}</span>
-                    <h3 className="font-bold text-slate-800 mt-1">{p.nombre}</h3>
-                    <span className="text-xs text-slate-400">{p.cat}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className={`text-xl font-black ${p.stock <= p.min ? 'text-red-500' : 'text-slate-800'}`}>
-                      {p.stock}
-                    </span>
-                    {p.stock <= p.min && (
-                      <span className="flex items-center gap-1 text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full mt-1">
-                        <AlertTriangle size={10} /> Stock Bajo
-                      </span>
-                    )}
-                  </div>
+            {productos.length === 0 ? (
+              <div className="w-full h-full flex flex-col items-center justify-center bg-white rounded-2xl border border-dashed border-slate-300 p-8 text-center">
+                <Upload size={48} className="text-blue-500 mb-4" />
+                <h3 className="text-lg font-bold text-slate-800">Carga tu archivo CSV</h3>
+                <p className="text-sm text-slate-500 max-w-sm mt-1">
+                  Usa el botón "Cargar CSV" del menú lateral para importar tu lista de productos de Google Sheets.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Lista de Productos */}
+                <div className="w-1/2 overflow-y-auto space-y-3 pr-2">
+                  {filteredProducts.map(p => (
+                    <div 
+                      key={p.sku + p.id} 
+                      onClick={() => setSelectedProduct(p)}
+                      className={`p-4 rounded-2xl bg-white border transition cursor-pointer flex justify-between items-center ${selectedProduct?.sku === p.sku ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-md' : 'border-slate-200 hover:border-slate-300'}`}>
+                      <div>
+                        <span className="text-xs font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">{p.sku}</span>
+                        <h3 className="font-bold text-slate-800 mt-1">{p.nombre}</h3>
+                        <span className="text-xs text-slate-400">{p.cat}</span>
+                      </div>
+                      <div className="text-right">
+                        <span className={`text-xl font-black ${p.stock <= p.min ? 'text-red-500' : 'text-slate-800'}`}>
+                          {p.stock}
+                        </span>
+                        {p.stock <= p.min && (
+                          <span className="flex items-center gap-1 text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full mt-1">
+                            <AlertTriangle size={10} /> Stock Bajo
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
 
-            {/* Ficha Interactiva Detallada (Derecha) */}
-            <div className="w-1/2 bg-white rounded-2xl border border-slate-200 p-6 flex flex-col justify-between shadow-sm">
-              {selectedProduct ? (
-                <div>
-                  <div className="flex justify-between items-start mb-6 border-b pb-4">
+                {/* Detalle del Producto */}
+                <div className="w-1/2 bg-white rounded-2xl border border-slate-200 p-6 flex flex-col justify-between shadow-sm">
+                  {selectedProduct ? (
                     <div>
-                      <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg">{selectedProduct.sku}</span>
-                      <h2 className="text-2xl font-black text-slate-900 mt-2">{selectedProduct.nombre}</h2>
-                      <p className="text-sm text-slate-500">{selectedProduct.cat}</p>
-                    </div>
-                    <div className="bg-slate-50 border p-4 rounded-xl text-center">
-                      <span className="text-xs text-slate-400 font-semibold uppercase block">Stock Actual</span>
-                      <span className={`text-3xl font-black ${selectedProduct.stock <= selectedProduct.min ? 'text-red-500' : 'text-slate-900'}`}>{selectedProduct.stock}</span>
-                    </div>
-                  </div>
+                      <div className="flex justify-between items-start mb-6 border-b pb-4">
+                        <div>
+                          <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg">{selectedProduct.sku}</span>
+                          <h2 className="text-2xl font-black text-slate-900 mt-2">{selectedProduct.nombre}</h2>
+                          <p className="text-sm text-slate-500">{selectedProduct.cat}</p>
+                        </div>
+                        <div className="bg-slate-50 border p-4 rounded-xl text-center">
+                          <span className="text-xs text-slate-400 font-semibold uppercase block">Stock Actual</span>
+                          <span className={`text-3xl font-black ${selectedProduct.stock <= selectedProduct.min ? 'text-red-500' : 'text-slate-900'}`}>{selectedProduct.stock}</span>
+                        </div>
+                      </div>
 
-                  <h4 className="font-bold text-sm text-slate-700 mb-3">Historial del Producto</h4>
-                  <div className="space-y-2">
-                    <div className="p-3 bg-slate-50 rounded-xl text-xs flex justify-between items-center border">
-                      <span className="flex items-center gap-2 font-medium"><ArrowDownLeft className="text-green-500" size={16}/> Entrada por compra</span>
-                      <span className="font-mono font-bold text-green-600">+10</span>
+                      <h4 className="font-bold text-sm text-slate-700 mb-3">Historial Individual del Producto</h4>
+                      <div className="space-y-2">
+                        <div className="p-3 bg-slate-50 rounded-xl text-xs flex justify-between items-center border">
+                          <span className="flex items-center gap-2 font-medium"><ArrowDownLeft className="text-green-500" size={16}/> Carga Inicial de Registro</span>
+                          <span className="font-mono font-bold text-green-600">+{selectedProduct.stock}</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="p-3 bg-slate-50 rounded-xl text-xs flex justify-between items-center border">
-                      <span className="flex items-center gap-2 font-medium"><ArrowUpRight className="text-blue-500" size={16}/> Salida asignada a personal</span>
-                      <span className="font-mono font-bold text-blue-600">-2</span>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                      <Package size={48} className="mb-2 text-slate-300" />
+                      <p className="text-sm">Selecciona un producto de la lista izquierda</p>
                     </div>
-                  </div>
+                  )}
                 </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                  <Package size={48} className="mb-2 text-slate-300" />
-                  <p className="text-sm">Selecciona un producto de la izquierda para ver su detalle</p>
-                </div>
-              )}
-            </div>
+              </>
+            )}
           </div>
         )}
 
-        {/* Vista del Historial Filtrable */}
+        {/* Historial General */}
         {activeTab === 'historial' && (
           <div className="p-6 overflow-y-auto flex-1">
             <div className="flex items-center justify-between mb-6">
@@ -198,31 +218,11 @@ export default function App() {
                 <div className="flex items-center gap-4">
                   <div className="p-2.5 bg-green-100 text-green-700 rounded-xl"><ArrowDownLeft size={20} /></div>
                   <div>
-                    <h4 className="font-bold text-sm">Entrada Multi-producto (Factura #102)</h4>
-                    <p className="text-xs text-slate-500">Ingreso por Compras • Hace 1 hora</p>
+                    <h4 className="font-bold text-sm">Entrada Registrada</h4>
+                    <p className="text-xs text-slate-500">Carga de Archivo CSV • Hoy</p>
                   </div>
                 </div>
-                <span className="text-xs font-bold bg-green-50 text-green-700 border border-green-200 px-3 py-1 rounded-full">+ 50 ítems</span>
-              </div>
-              <div className="p-4 flex justify-between items-center hover:bg-slate-50">
-                <div className="flex items-center gap-4">
-                  <div className="p-2.5 bg-blue-100 text-blue-700 rounded-xl"><ArrowUpRight size={20} /></div>
-                  <div>
-                    <h4 className="font-bold text-sm">Entrega a Compañero</h4>
-                    <p className="text-xs text-slate-500">Receptor: Juan Pérez (Mantenimiento) • Hoy 10:30 AM</p>
-                  </div>
-                </div>
-                <span className="text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1 rounded-full">- 3 ítems</span>
-              </div>
-              <div className="p-4 flex justify-between items-center hover:bg-slate-50">
-                <div className="flex items-center gap-4">
-                  <div className="p-2.5 bg-amber-100 text-amber-700 rounded-xl"><RefreshCw size={20} /></div>
-                  <div>
-                    <h4 className="font-bold text-sm">Transferencia Inter-plantel</h4>
-                    <p className="text-xs text-slate-500">Destino: Plantel Norte • Leyenda: Apoyo Inter-sede</p>
-                  </div>
-                </div>
-                <span className="text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1 rounded-full">Ajuste</span>
+                <span className="text-xs font-bold bg-green-50 text-green-700 border border-green-200 px-3 py-1 rounded-full">{productos.length} productos cargados</span>
               </div>
             </div>
           </div>
