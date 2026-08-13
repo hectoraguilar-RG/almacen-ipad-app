@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { Package, ArrowDownLeft, ArrowUpRight, RefreshCw, Search, Filter, AlertTriangle, Layers, UserCheck, Edit, Camera, Trash2, CheckCircle2, Building2 } from 'lucide-react';
+import { Package, ArrowDownLeft, ArrowUpRight, RefreshCw, Search, Filter, AlertTriangle, Layers, UserCheck, Edit, Camera, Trash2, CheckCircle2, Plus, Users, UserPlus, X } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('catalogo');
@@ -8,6 +8,19 @@ export default function App() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [editingProduct, setEditingProduct] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('Todas');
+
+  // Modales de Administración
+  const [showAddProductModal, setShowAddProductModal] = useState(false);
+  const [showPersonalModal, setShowPersonalModal] = useState(false);
+
+  // Estados de formularios para nuevos registros
+  const [newProduct, setNewProduct] = useState({
+    codigo: '', nombre: '', cat: 'Limpieza', unidad: 'Pza', stock: 0, min: 5, sku: ''
+  });
+
+  const [newEmployee, setNewEmployee] = useState({
+    id_empleado: '', nombre: '', departamento: 'Limpieza', plantel: 'Secundaria'
+  });
 
   // Filtros Avanzados para Historial
   const [filterTipo, setFilterTipo] = useState('todos');
@@ -20,8 +33,8 @@ export default function App() {
   const [historialMovimientos, setHistorialMovimientos] = useState([]);
   const [cargando, setCargando] = useState(true);
 
-  // Estados para nuevo registro
-  const [tipoMovimiento, setTipoMovimiento] = useState('salida'); // salida, entrada, ajuste, traspaso
+  // Estados para transacción de Movimientos
+  const [tipoMovimiento, setTipoMovimiento] = useState('salida');
   const [empleadoSeleccionado, setEmpleadoSeleccionado] = useState('');
   const [plantelDestino, setPlantelDestino] = useState('Secundaria');
   const [motivoAjuste, setMotivoAjuste] = useState('Ajuste por Auditoría');
@@ -34,7 +47,7 @@ export default function App() {
   const fetchDatos = async () => {
     setCargando(true);
     
-    // 1. Obtener productos
+    // 1. Productos
     const { data: dataProds } = await supabase.from('productos').select('*').order('id', { ascending: true });
     if (dataProds) {
       const prodsFormatted = dataProds.map(p => ({
@@ -51,19 +64,64 @@ export default function App() {
       if (prodsFormatted.length > 0 && !selectedProduct) setSelectedProduct(prodsFormatted[0]);
     }
 
-    // 2. Obtener personal
-    const { data: dataPersonal } = await supabase.from('personal').select('*');
+    // 2. Personal
+    const { data: dataPersonal } = await supabase.from('personal').select('*').order('nombre', { ascending: true });
     if (dataPersonal) setPersonal(dataPersonal);
 
-    // 3. Obtener movimientos
+    // 3. Movimientos
     const { data: dataMovs } = await supabase.from('movimientos').select('*').order('created_at', { ascending: false });
     if (dataMovs) setHistorialMovimientos(dataMovs);
 
     setCargando(false);
   };
 
-  // Obtener lista única de categorías
   const categoriasUnicas = ['Todas', ...new Set(productos.map(p => p.cat).filter(Boolean))];
+
+  // AGREGAR Y ELIMINAR PRODUCTOS
+  const handleCreateProduct = async (e) => {
+    e.preventDefault();
+    if (!newProduct.nombre || !newProduct.codigo) return alert('Completa el nombre y el código del producto');
+
+    const { error } = await supabase.from('productos').insert([newProduct]);
+    if (error) return alert('Error al crear el producto: ' + error.message);
+
+    alert('¡Producto creado exitosamente!');
+    setNewProduct({ codigo: '', nombre: '', cat: 'Limpieza', unidad: 'Pza', stock: 0, min: 5, sku: '' });
+    setShowAddProductModal(false);
+    fetchDatos();
+  };
+
+  const handleDeleteProduct = async (id, nombre) => {
+    if (confirm(`¿Estás seguro de dar de baja el producto "${nombre}"?`)) {
+      const { error } = await supabase.from('productos').delete().eq('id', id);
+      if (error) return alert('Error al eliminar: ' + error.message);
+      
+      alert('Producto eliminado correctamente.');
+      setSelectedProduct(null);
+      fetchDatos();
+    }
+  };
+
+  // AGREGAR Y ELIMINAR PERSONAL
+  const handleCreateEmployee = async (e) => {
+    e.preventDefault();
+    if (!newEmployee.nombre || !newEmployee.id_empleado) return alert('Completa el ID y el Nombre del colaborador');
+
+    const { error } = await supabase.from('personal').insert([newEmployee]);
+    if (error) return alert('Error al agregar personal: ' + error.message);
+
+    alert('¡Colaborador agregado exitosamente!');
+    setNewEmployee({ id_empleado: '', nombre: '', departamento: 'Limpieza', plantel: 'Secundaria' });
+    fetchDatos();
+  };
+
+  const handleDeleteEmployee = async (id, nombre) => {
+    if (confirm(`¿Estás seguro de eliminar a "${nombre}" de la lista de personal?`)) {
+      const { error } = await supabase.from('personal').delete().eq('id', id);
+      if (error) return alert('Error al eliminar personal: ' + error.message);
+      fetchDatos();
+    }
+  };
 
   const agregarAlCarrito = (prod) => {
     const existe = carrito.find(item => item.id === prod.id);
@@ -84,7 +142,6 @@ export default function App() {
 
     if (tipoMovimiento === 'salida' && !empleadoSeleccionado) return alert('Selecciona al compañero receptor');
 
-    // Actualizar stock en Supabase
     for (const item of carrito) {
       let delta = item.cant;
       if (tipoMovimiento === 'salida' || tipoMovimiento === 'ajuste' || tipoMovimiento === 'traspaso') delta = -delta;
@@ -96,7 +153,6 @@ export default function App() {
         .eq('id', item.id);
     }
 
-    // Guardar historial en Supabase
     const resumenDetalles = carrito.map(c => `${c.nombre} (${c.cant} ${c.unidad})`).join(', ');
     await supabase.from('movimientos').insert([
       {
@@ -128,7 +184,6 @@ export default function App() {
     fetchDatos();
   };
 
-  // Filtrado de Productos por Búsqueda y Categoría
   const filteredProducts = productos.filter(p => {
     const matchSearch = (p.nombre && p.nombre.toLowerCase().includes(searchTerm.toLowerCase())) || 
                         (p.sku && p.sku.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -137,7 +192,6 @@ export default function App() {
     return matchSearch && matchCat;
   });
 
-  // Filtrado Combinado de Movimientos
   const filteredMovimientos = historialMovimientos.filter(h => {
     const matchTipo = filterTipo === 'todos' || h.tipo === filterTipo;
     const matchResp = filterResponsable === 'todos' || (h.responsable && h.responsable.toLowerCase().includes(filterResponsable.toLowerCase()));
@@ -177,6 +231,20 @@ export default function App() {
               <Filter size={20} /> Historial Filtrable
             </button>
           </nav>
+
+          <div className="mt-8 border-t border-slate-800 pt-4 space-y-2">
+            <span className="text-[10px] uppercase font-bold text-slate-500 block px-1">Administración</span>
+            <button 
+              onClick={() => setShowAddProductModal(true)}
+              className="w-full text-left px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-2 border border-slate-700">
+              <Plus size={16} className="text-blue-400" /> Nuevo Producto
+            </button>
+            <button 
+              onClick={() => setShowPersonalModal(true)}
+              className="w-full text-left px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-2 border border-slate-700">
+              <Users size={16} className="text-purple-400" /> Administrar Personal
+            </button>
+          </div>
         </div>
 
         <button 
@@ -211,16 +279,22 @@ export default function App() {
             {/* CATÁLOGO POR CATEGORÍAS */}
             {activeTab === 'catalogo' && (
               <div className="flex-1 flex flex-col overflow-hidden p-6 gap-4">
-                {/* Selector de Categorías */}
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  {categoriasUnicas.map(cat => (
-                    <button 
-                      key={cat}
-                      onClick={() => setSelectedCategory(cat)}
-                      className={`px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${selectedCategory === cat ? 'bg-slate-900 text-white shadow-md' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                      {cat}
-                    </button>
-                  ))}
+                <div className="flex justify-between items-center">
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {categoriasUnicas.map(cat => (
+                      <button 
+                        key={cat}
+                        onClick={() => setSelectedCategory(cat)}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${selectedCategory === cat ? 'bg-slate-900 text-white shadow-md' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                  <button 
+                    onClick={() => setShowAddProductModal(true)}
+                    className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md">
+                    <Plus size={16} /> Agregar Producto
+                  </button>
                 </div>
 
                 <div className="flex-1 flex overflow-hidden gap-6">
@@ -266,11 +340,18 @@ export default function App() {
                             <h2 className="text-2xl font-black text-slate-900 mt-3">{selectedProduct.nombre}</h2>
                             <p className="text-sm text-slate-500">{selectedProduct.cat} • Unidad: {selectedProduct.unidad}</p>
                           </div>
-                          <button 
-                            onClick={() => setEditingProduct(selectedProduct)}
-                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 border">
-                            <Edit size={14} /> Editar
-                          </button>
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => setEditingProduct(selectedProduct)}
+                              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 border">
+                              <Edit size={14} /> Editar
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteProduct(selectedProduct.id, selectedProduct.nombre)}
+                              className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-xs font-bold flex items-center gap-1 border border-red-200">
+                              <Trash2 size={14} /> Eliminar
+                            </button>
+                          </div>
                         </div>
 
                         <div className="mb-6">
@@ -381,19 +462,15 @@ export default function App() {
               </div>
             )}
 
-            {/* MÓDULO HISTORIAL CON FILTROS COMBINADOS */}
+            {/* MÓDULO HISTORIAL */}
             {activeTab === 'historial' && (
               <div className="p-6 overflow-y-auto flex-1">
                 <h2 className="text-2xl font-bold mb-4">Bitácora de Movimientos</h2>
 
-                {/* Barra de Filtros Combinables */}
                 <div className="bg-white p-4 rounded-2xl border border-slate-200 mb-6 grid grid-cols-3 gap-4 shadow-sm">
                   <div>
                     <label className="text-xs font-bold text-slate-500 block mb-1">Tipo de Movimiento</label>
-                    <select 
-                      value={filterTipo} 
-                      onChange={(e) => setFilterTipo(e.target.value)}
-                      className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold">
+                    <select value={filterTipo} onChange={(e) => setFilterTipo(e.target.value)} className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold">
                       <option value="todos">Todos los tipos</option>
                       <option value="salida">Salidas</option>
                       <option value="traspaso">Traspasos</option>
@@ -401,31 +478,22 @@ export default function App() {
                       <option value="ajuste">Ajustes</option>
                     </select>
                   </div>
-
                   <div>
                     <label className="text-xs font-bold text-slate-500 block mb-1">Filtrar por Producto</label>
-                    <select 
-                      value={filterProducto} 
-                      onChange={(e) => setFilterProducto(e.target.value)}
-                      className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold">
+                    <select value={filterProducto} onChange={(e) => setFilterProducto(e.target.value)} className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold">
                       <option value="todos">Todos los productos</option>
                       {productos.map(p => <option key={p.id} value={p.nombre}>{p.nombre}</option>)}
                     </select>
                   </div>
-
                   <div>
                     <label className="text-xs font-bold text-slate-500 block mb-1">Filtrar por Receptor / Empleado</label>
-                    <select 
-                      value={filterResponsable} 
-                      onChange={(e) => setFilterResponsable(e.target.value)}
-                      className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold">
+                    <select value={filterResponsable} onChange={(e) => setFilterResponsable(e.target.value)} className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold">
                       <option value="todos">Todos los empleados</option>
                       {personal.map(e => <option key={e.id} value={e.nombre}>{e.nombre}</option>)}
                     </select>
                   </div>
                 </div>
 
-                {/* Lista de Registros Coincidentes */}
                 <div className="bg-white rounded-2xl border divide-y shadow-sm">
                   {filteredMovimientos.length === 0 ? (
                     <div className="p-8 text-center text-slate-400 text-sm">No se encontraron movimientos con los filtros seleccionados.</div>
@@ -457,9 +525,108 @@ export default function App() {
         )}
       </main>
 
-      {/* Modal Editar Producto */}
+      {/* MODAL CREAR NUEVO PRODUCTO */}
+      {showAddProductModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <form onSubmit={handleCreateProduct} className="bg-white rounded-2xl p-6 w-[450px] shadow-2xl border space-y-4">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2"><Plus className="text-blue-600"/> Alta de Nuevo Producto</h3>
+              <button type="button" onClick={() => setShowAddProductModal(false)}><X size={20} className="text-slate-400"/></button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Código Interno *</label>
+                <input type="text" placeholder="Ej. 0025" value={newProduct.codigo} onChange={e => setNewProduct({...newProduct, codigo: e.target.value})} className="w-full p-2 border rounded-xl text-sm" required />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">SKU / Código de Barras</label>
+                <input type="text" placeholder="Ej. 7501032..." value={newProduct.sku} onChange={e => setNewProduct({...newProduct, sku: e.target.value})} className="w-full p-2 border rounded-xl text-sm" />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1">Nombre del Producto *</label>
+              <input type="text" placeholder="Ej. Jabón Líquido Manos" value={newProduct.nombre} onChange={e => setNewProduct({...newProduct, nombre: e.target.value})} className="w-full p-2 border rounded-xl text-sm" required />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Categoría</label>
+                <input type="text" placeholder="Limpieza / Papelería" value={newProduct.cat} onChange={e => setNewProduct({...newProduct, cat: e.target.value})} className="w-full p-2 border rounded-xl text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Unidad de Medida</label>
+                <select value={newProduct.unidad} onChange={e => setNewProduct({...newProduct, unidad: e.target.value})} className="w-full p-2 border rounded-xl text-sm">
+                  <option value="Pza">Pieza (Pza)</option>
+                  <option value="Lt">Litro (Lt)</option>
+                  <option value="Kg">Kilogramo (Kg)</option>
+                  <option value="Caja">Caja</option>
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Stock Inicial</label>
+                <input type="number" value={newProduct.stock} onChange={e => setNewProduct({...newProduct, stock: parseInt(e.target.value) || 0})} className="w-full p-2 border rounded-xl text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Stock Mínimo</label>
+                <input type="number" value={newProduct.min} onChange={e => setNewProduct({...newProduct, min: parseInt(e.target.value) || 5})} className="w-full p-2 border rounded-xl text-sm" />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setShowAddProductModal(false)} className="w-1/2 py-2.5 border rounded-xl font-bold text-xs">Cancelar</button>
+              <button type="submit" className="w-1/2 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-xs hover:bg-blue-700">Guardar en Supabase</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL ADMINISTRAR PERSONAL */}
+      {showPersonalModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl p-6 w-[550px] shadow-2xl border space-y-4 max-h-[85vh] flex flex-col justify-between">
+            <div>
+              <div className="flex justify-between items-center border-b pb-3 mb-4">
+                <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2"><Users className="text-purple-600"/> Gestor de Personal</h3>
+                <button type="button" onClick={() => setShowPersonalModal(false)}><X size={20} className="text-slate-400"/></button>
+              </div>
+
+              {/* Formulario Agregar */}
+              <form onSubmit={handleCreateEmployee} className="bg-slate-50 p-3 rounded-xl border space-y-3 mb-4">
+                <span className="text-xs font-bold text-slate-700 flex items-center gap-1"><UserPlus size={14}/> Registrar Nuevo Colaborador</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="text" placeholder="ID Empleado (Ej. 0080)" value={newEmployee.id_empleado} onChange={e => setNewEmployee({...newEmployee, id_empleado: e.target.value})} className="p-2 border rounded-lg text-xs" required />
+                  <input type="text" placeholder="Nombre Completo" value={newEmployee.nombre} onChange={e => setNewEmployee({...newEmployee, nombre: e.target.value})} className="p-2 border rounded-lg text-xs" required />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="text" placeholder="Departamento" value={newEmployee.departamento} onChange={e => setNewEmployee({...newEmployee, departamento: e.target.value})} className="p-2 border rounded-lg text-xs" />
+                  <input type="text" placeholder="Plantel" value={newEmployee.plantel} onChange={e => setNewEmployee({...newEmployee, plantel: e.target.value})} className="p-2 border rounded-lg text-xs" />
+                </div>
+                <button type="submit" className="w-full py-2 bg-purple-600 text-white rounded-lg font-bold text-xs hover:bg-purple-700">+ Guardar Colaborador</button>
+              </form>
+
+              {/* Lista Personal */}
+              <h4 className="font-bold text-xs text-slate-500 uppercase mb-2">Personal Registrado ({personal.length})</h4>
+              <div className="space-y-2 overflow-y-auto max-h-44 pr-1">
+                {personal.map(e => (
+                  <div key={e.id} className="p-2.5 bg-white border rounded-xl flex justify-between items-center text-xs">
+                    <div>
+                      <p className="font-bold text-slate-800">{e.nombre}</p>
+                      <span className="text-slate-400 text-[10px]">ID: {e.id_empleado} • {e.departamento || e.plantel}</span>
+                    </div>
+                    <button onClick={() => handleDeleteEmployee(e.id, e.nombre)} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg"><Trash2 size={14}/></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <button type="button" onClick={() => setShowPersonalModal(false)} className="w-full py-2.5 border rounded-xl font-bold text-xs mt-2">Cerrar</button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDITAR PRODUCTO */}
       {editingProduct && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <form onSubmit={guardarEdicionProducto} className="bg-white rounded-2xl p-6 w-96 shadow-2xl border space-y-4">
             <h3 className="font-bold text-lg">Editar Producto</h3>
             <div>
@@ -469,11 +636,11 @@ export default function App() {
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs font-bold text-slate-500 block mb-1">Stock Actual</label>
-                <input type="number" value={editingProduct.stock} onChange={e => setEditingProduct({...editingProduct, stock: parseInt(e.target.value)})} className="w-full p-2 border rounded-xl text-sm" />
+                <input type="number" value={editingProduct.stock} onChange={e => setEditingProduct({...editingProduct, stock: parseInt(e.target.value) || 0})} className="w-full p-2 border rounded-xl text-sm" />
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-500 block mb-1">Stock Mínimo</label>
-                <input type="number" value={editingProduct.min} onChange={e => setEditingProduct({...editingProduct, min: parseInt(e.target.value)})} className="w-full p-2 border rounded-xl text-sm" />
+                <input type="number" value={editingProduct.min} onChange={e => setEditingProduct({...editingProduct, min: parseInt(e.target.value) || 0})} className="w-full p-2 border rounded-xl text-sm" />
               </div>
             </div>
             <div className="flex gap-2 pt-2">
