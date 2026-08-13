@@ -1,27 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { Package, ArrowDownLeft, ArrowUpRight, RefreshCw, Search, Filter, AlertTriangle, Layers, UserCheck, Edit, Camera, Trash2, CheckCircle2 } from 'lucide-react';
+import { Package, ArrowDownLeft, ArrowUpRight, RefreshCw, Search, Filter, AlertTriangle, Layers, UserCheck, Edit, Camera, Trash2, CheckCircle2, Building2 } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('catalogo');
-  const [filterType, setFilterType] = useState('todos');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [editingProduct, setEditingProduct] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState('Todas');
 
-  // Estados de datos sincronizados con Supabase
+  // Filtros Avanzados para Historial
+  const [filterTipo, setFilterTipo] = useState('todos');
+  const [filterProducto, setFilterProducto] = useState('todos');
+  const [filterResponsable, setFilterResponsable] = useState('todos');
+
+  // Estados desde Supabase
   const [productos, setProductos] = useState([]);
   const [personal, setPersonal] = useState([]);
   const [historialMovimientos, setHistorialMovimientos] = useState([]);
   const [cargando, setCargando] = useState(true);
 
   // Estados para nuevo registro
-  const [tipoMovimiento, setTipoMovimiento] = useState('salida');
+  const [tipoMovimiento, setTipoMovimiento] = useState('salida'); // salida, entrada, ajuste, traspaso
   const [empleadoSeleccionado, setEmpleadoSeleccionado] = useState('');
+  const [plantelDestino, setPlantelDestino] = useState('Secundaria');
   const [motivoAjuste, setMotivoAjuste] = useState('Ajuste por Auditoría');
   const [carrito, setCarrito] = useState([]);
 
-  // Cargar datos en tiempo real al iniciar
   useEffect(() => {
     fetchDatos();
   }, []);
@@ -32,25 +37,38 @@ export default function App() {
     // 1. Obtener productos
     const { data: dataProds } = await supabase.from('productos').select('*').order('id', { ascending: true });
     if (dataProds) {
-      setProductos(dataProds);
-      if (dataProds.length > 0 && !selectedProduct) setSelectedProduct(dataProds[0]);
+      const prodsFormatted = dataProds.map(p => ({
+        id: p.id,
+        codigo: p.codigo || p.Código || '000',
+        nombre: p.nombre || p['Nombre del Producto'] || 'Sin nombre',
+        stock: p.stock ?? p['Stock Inicial'] ?? 0,
+        min: p.min ?? p['Stock Minimo'] ?? 5,
+        sku: p.sku || p.SKU || '',
+        cat: p.cat || p.Categoria || p.Categoría || 'Limpieza',
+        unidad: p.unidad || p.Unidad || 'Pza'
+      }));
+      setProductos(prodsFormatted);
+      if (prodsFormatted.length > 0 && !selectedProduct) setSelectedProduct(prodsFormatted[0]);
     }
 
     // 2. Obtener personal
     const { data: dataPersonal } = await supabase.from('personal').select('*');
     if (dataPersonal) setPersonal(dataPersonal);
 
-    // 3. Obtener bitácora de movimientos
+    // 3. Obtener movimientos
     const { data: dataMovs } = await supabase.from('movimientos').select('*').order('created_at', { ascending: false });
     if (dataMovs) setHistorialMovimientos(dataMovs);
 
     setCargando(false);
   };
 
+  // Obtener lista única de categorías
+  const categoriasUnicas = ['Todas', ...new Set(productos.map(p => p.cat).filter(Boolean))];
+
   const agregarAlCarrito = (prod) => {
-    const existe = carrito.find(item => item.sku === prod.sku);
+    const existe = carrito.find(item => item.id === prod.id);
     if (existe) {
-      setCarrito(carrito.map(item => item.sku === prod.sku ? { ...item, cant: item.cant + 1 } : item));
+      setCarrito(carrito.map(item => item.id === prod.id ? { ...item, cant: item.cant + 1 } : item));
     } else {
       setCarrito([...carrito, { ...prod, cant: 1 }]);
     }
@@ -58,13 +76,18 @@ export default function App() {
 
   const procesarRegistro = async () => {
     if (carrito.length === 0) return alert('Agrega al menos un producto');
-    const responsableFinal = tipoMovimiento === 'salida' ? empleadoSeleccionado : motivoAjuste;
+    
+    let responsableFinal = empleadoSeleccionado;
+    if (tipoMovimiento === 'traspaso') responsableFinal = `Traspaso a Plantel ${plantelDestino}`;
+    if (tipoMovimiento === 'ajuste') responsableFinal = motivoAjuste;
+    if (tipoMovimiento === 'entrada') responsableFinal = 'Entrada por Compra / Proveedor';
+
     if (tipoMovimiento === 'salida' && !empleadoSeleccionado) return alert('Selecciona al compañero receptor');
 
-    // 1. Actualizar stock en Supabase para cada producto del carrito
+    // Actualizar stock en Supabase
     for (const item of carrito) {
       let delta = item.cant;
-      if (tipoMovimiento === 'salida' || tipoMovimiento === 'ajuste') delta = -delta;
+      if (tipoMovimiento === 'salida' || tipoMovimiento === 'ajuste' || tipoMovimiento === 'traspaso') delta = -delta;
       const nuevoStock = Math.max(0, item.stock + delta);
 
       await supabase
@@ -73,8 +96,8 @@ export default function App() {
         .eq('id', item.id);
     }
 
-    // 2. Guardar el movimiento en la tabla movimientos
-    const resumenDetalles = carrito.map(c => `${c.nombre} (${c.cant})`).join(', ');
+    // Guardar historial en Supabase
+    const resumenDetalles = carrito.map(c => `${c.nombre} (${c.cant} ${c.unidad})`).join(', ');
     await supabase.from('movimientos').insert([
       {
         tipo: tipoMovimiento,
@@ -85,8 +108,8 @@ export default function App() {
     ]);
 
     setCarrito([]);
-    alert('¡Registro guardado en Supabase!');
-    fetchDatos(); // Recargar datos frescos
+    alert('¡Registro y movimiento guardado en Supabase!');
+    fetchDatos();
   };
 
   const guardarEdicionProducto = async (e) => {
@@ -105,11 +128,22 @@ export default function App() {
     fetchDatos();
   };
 
-  const filteredProducts = productos.filter(p => 
-    (p.nombre && p.nombre.toLowerCase().includes(searchTerm.toLowerCase())) || 
-    (p.sku && p.sku.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (p.codigo && p.codigo.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  // Filtrado de Productos por Búsqueda y Categoría
+  const filteredProducts = productos.filter(p => {
+    const matchSearch = (p.nombre && p.nombre.toLowerCase().includes(searchTerm.toLowerCase())) || 
+                        (p.sku && p.sku.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                        (p.codigo && p.codigo.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchCat = selectedCategory === 'Todas' || p.cat === selectedCategory;
+    return matchSearch && matchCat;
+  });
+
+  // Filtrado Combinado de Movimientos
+  const filteredMovimientos = historialMovimientos.filter(h => {
+    const matchTipo = filterTipo === 'todos' || h.tipo === filterTipo;
+    const matchResp = filterResponsable === 'todos' || (h.responsable && h.responsable.toLowerCase().includes(filterResponsable.toLowerCase()));
+    const matchProd = filterProducto === 'todos' || (h.detalles && h.detalles.toLowerCase().includes(filterProducto.toLowerCase()));
+    return matchTipo && matchResp && matchProd;
+  });
 
   return (
     <div className="flex h-screen bg-slate-100 font-sans text-slate-800">
@@ -171,86 +205,102 @@ export default function App() {
         </header>
 
         {cargando ? (
-          <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">Conectando a la base de datos...</div>
+          <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">Cargando datos desde Supabase...</div>
         ) : (
           <>
-            {/* MÓDULO CATÁLOGO */}
+            {/* CATÁLOGO POR CATEGORÍAS */}
             {activeTab === 'catalogo' && (
-              <div className="flex-1 flex overflow-hidden p-6 gap-6">
-                <div className="w-1/2 overflow-y-auto space-y-3 pr-2">
-                  {filteredProducts.map(p => (
-                    <div 
-                      key={p.id} 
-                      onClick={() => setSelectedProduct(p)}
-                      className={`p-4 rounded-2xl bg-white border transition cursor-pointer flex justify-between items-center ${selectedProduct?.id === p.id ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-md' : 'border-slate-200 hover:border-slate-300'}`}>
-                      <div>
-                        <div className="flex gap-2 items-center">
-                          <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">Cód: {p.codigo}</span>
-                          <span className="text-[10px] font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">SKU: {p.sku}</span>
-                        </div>
-                        <h3 className="font-bold text-slate-800 mt-1.5">{p.nombre}</h3>
-                        <span className="text-xs text-slate-400">{p.cat} • {p.unidad}</span>
-                      </div>
-                      <div className="text-right">
-                        <span className={`text-xl font-black ${p.stock <= p.min ? 'text-red-500' : 'text-slate-800'}`}>
-                          {p.stock} <span className="text-xs text-slate-400 font-normal">{p.unidad}</span>
-                        </span>
-                        {p.stock <= p.min && (
-                          <span className="flex items-center justify-end gap-1 text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full mt-1">
-                            <AlertTriangle size={10} /> Stock Bajo
-                          </span>
-                        )}
-                      </div>
-                    </div>
+              <div className="flex-1 flex flex-col overflow-hidden p-6 gap-4">
+                {/* Selector de Categorías */}
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {categoriasUnicas.map(cat => (
+                    <button 
+                      key={cat}
+                      onClick={() => setSelectedCategory(cat)}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${selectedCategory === cat ? 'bg-slate-900 text-white shadow-md' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                      {cat}
+                    </button>
                   ))}
                 </div>
 
-                <div className="w-1/2 bg-white rounded-2xl border border-slate-200 p-6 flex flex-col justify-between shadow-sm overflow-y-auto">
-                  {selectedProduct ? (
-                    <div>
-                      <div className="flex justify-between items-start mb-6 border-b pb-4">
+                <div className="flex-1 flex overflow-hidden gap-6">
+                  {/* Lista de Productos */}
+                  <div className="w-1/2 overflow-y-auto space-y-3 pr-2">
+                    {filteredProducts.map(p => (
+                      <div 
+                        key={p.id} 
+                        onClick={() => setSelectedProduct(p)}
+                        className={`p-4 rounded-2xl bg-white border transition cursor-pointer flex justify-between items-center ${selectedProduct?.id === p.id ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-md' : 'border-slate-200 hover:border-slate-300'}`}>
                         <div>
-                          <div className="flex gap-2">
-                            <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg">SKU: {selectedProduct.sku}</span>
-                            <span className="text-xs font-mono font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg">Código: {selectedProduct.codigo}</span>
+                          <div className="flex gap-2 items-center">
+                            <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">Cód: {p.codigo}</span>
+                            <span className="text-[10px] font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">SKU: {p.sku}</span>
                           </div>
-                          <h2 className="text-2xl font-black text-slate-900 mt-3">{selectedProduct.nombre}</h2>
-                          <p className="text-sm text-slate-500">{selectedProduct.cat} • Unidad: {selectedProduct.unidad}</p>
+                          <h3 className="font-bold text-slate-800 mt-1.5">{p.nombre}</h3>
+                          <span className="text-xs text-slate-400">{p.cat} • {p.unidad}</span>
                         </div>
-                        <button 
-                          onClick={() => setEditingProduct(selectedProduct)}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 border">
-                          <Edit size={14} /> Editar
-                        </button>
+                        <div className="text-right">
+                          <span className={`text-xl font-black ${p.stock <= p.min ? 'text-red-500' : 'text-slate-800'}`}>
+                            {p.stock} <span className="text-xs text-slate-400 font-normal">{p.unidad}</span>
+                          </span>
+                          {p.stock <= p.min && (
+                            <span className="flex items-center justify-end gap-1 text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full mt-1">
+                              <AlertTriangle size={10} /> Stock Bajo
+                            </span>
+                          )}
+                        </div>
                       </div>
+                    ))}
+                  </div>
 
-                      <div className="mb-6">
-                        <h4 className="font-bold text-sm text-slate-700 mb-2">Fotografía del Producto</h4>
-                        <div className="w-full h-36 bg-slate-50 rounded-xl border border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 gap-2">
-                          <Camera size={24} />
-                          <span className="text-xs">Evidencia fotográfica en Supabase</span>
+                  {/* Ficha Detalle */}
+                  <div className="w-1/2 bg-white rounded-2xl border border-slate-200 p-6 flex flex-col justify-between shadow-sm overflow-y-auto">
+                    {selectedProduct ? (
+                      <div>
+                        <div className="flex justify-between items-start mb-6 border-b pb-4">
+                          <div>
+                            <div className="flex gap-2">
+                              <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg">SKU: {selectedProduct.sku}</span>
+                              <span className="text-xs font-mono font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-lg">Código: {selectedProduct.codigo}</span>
+                            </div>
+                            <h2 className="text-2xl font-black text-slate-900 mt-3">{selectedProduct.nombre}</h2>
+                            <p className="text-sm text-slate-500">{selectedProduct.cat} • Unidad: {selectedProduct.unidad}</p>
+                          </div>
+                          <button 
+                            onClick={() => setEditingProduct(selectedProduct)}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 border">
+                            <Edit size={14} /> Editar
+                          </button>
                         </div>
-                      </div>
 
-                      <div className="bg-slate-50 p-4 rounded-xl border mb-6 flex justify-around text-center">
-                        <div>
-                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Stock Actual</span>
-                          <span className="text-2xl font-black text-slate-800">{selectedProduct.stock}</span>
+                        <div className="mb-6">
+                          <h4 className="font-bold text-sm text-slate-700 mb-2">Fotografía del Producto</h4>
+                          <div className="w-full h-36 bg-slate-50 rounded-xl border border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 gap-2">
+                            <Camera size={24} />
+                            <span className="text-xs">Evidencia fotográfica en Supabase</span>
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Stock Mínimo</span>
-                          <span className="text-2xl font-black text-slate-800">{selectedProduct.min}</span>
+
+                        <div className="bg-slate-50 p-4 rounded-xl border mb-6 flex justify-around text-center">
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Stock Actual</span>
+                            <span className="text-2xl font-black text-slate-800">{selectedProduct.stock}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] uppercase font-bold text-slate-400 block">Stock Mínimo</span>
+                            <span className="text-2xl font-black text-slate-800">{selectedProduct.min}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-slate-400 text-sm">Selecciona un producto</div>
-                  )}
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-slate-400 text-sm">Selecciona un producto</div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* MÓDULO REGISTRO DE ENTRADAS / SALIDAS */}
+            {/* MÓDULO REGISTRO ENTRADA / SALIDA / TRASPASO */}
             {activeTab === 'movimiento' && (
               <div className="flex-1 flex p-6 gap-6 overflow-hidden">
                 <div className="w-1/2 overflow-y-auto space-y-2 pr-2">
@@ -273,10 +323,11 @@ export default function App() {
                 <div className="w-1/2 bg-white rounded-2xl border p-6 flex flex-col justify-between shadow-sm">
                   <div>
                     <h3 className="font-bold text-lg mb-4">Detalles del Registro</h3>
-                    <div className="grid grid-cols-3 gap-2 mb-4">
-                      <button onClick={() => setTipoMovimiento('salida')} className={`p-2 rounded-xl text-xs font-bold border ${tipoMovimiento === 'salida' ? 'bg-blue-600 text-white' : 'bg-slate-50'}`}>Salida a Compañero</button>
-                      <button onClick={() => setTipoMovimiento('entrada')} className={`p-2 rounded-xl text-xs font-bold border ${tipoMovimiento === 'entrada' ? 'bg-green-600 text-white' : 'bg-slate-50'}`}>Entrada por Compra</button>
-                      <button onClick={() => setTipoMovimiento('ajuste')} className={`p-2 rounded-xl text-xs font-bold border ${tipoMovimiento === 'ajuste' ? 'bg-amber-600 text-white' : 'bg-slate-50'}`}>Ajuste Auditoría</button>
+                    <div className="grid grid-cols-4 gap-1.5 mb-4">
+                      <button onClick={() => setTipoMovimiento('salida')} className={`p-2 rounded-xl text-[11px] font-bold border ${tipoMovimiento === 'salida' ? 'bg-blue-600 text-white' : 'bg-slate-50'}`}>Salida Persona</button>
+                      <button onClick={() => setTipoMovimiento('traspaso')} className={`p-2 rounded-xl text-[11px] font-bold border ${tipoMovimiento === 'traspaso' ? 'bg-purple-600 text-white' : 'bg-slate-50'}`}>Traspaso Plantel</button>
+                      <button onClick={() => setTipoMovimiento('entrada')} className={`p-2 rounded-xl text-[11px] font-bold border ${tipoMovimiento === 'entrada' ? 'bg-green-600 text-white' : 'bg-slate-50'}`}>Entrada Compra</button>
+                      <button onClick={() => setTipoMovimiento('ajuste')} className={`p-2 rounded-xl text-[11px] font-bold border ${tipoMovimiento === 'ajuste' ? 'bg-amber-600 text-white' : 'bg-slate-50'}`}>Ajuste Auditoría</button>
                     </div>
 
                     {tipoMovimiento === 'salida' && (
@@ -287,13 +338,28 @@ export default function App() {
                           onChange={(e) => setEmpleadoSeleccionado(e.target.value)}
                           className="w-full p-2.5 bg-slate-50 border rounded-xl text-sm font-medium">
                           <option value="">Selecciona empleado...</option>
-                          {personal.map(e => <option key={e.id} value={e.nombre}>{e.nombre} ({e.departamento})</option>)}
+                          {personal.map(e => <option key={e.id} value={e.nombre}>{e.nombre} ({e.departamento || e.plantel})</option>)}
+                        </select>
+                      </div>
+                    )}
+
+                    {tipoMovimiento === 'traspaso' && (
+                      <div className="mb-4">
+                        <label className="text-xs font-bold text-slate-600 block mb-1">Plantel Destino:</label>
+                        <select 
+                          value={plantelDestino} 
+                          onChange={(e) => setPlantelDestino(e.target.value)}
+                          className="w-full p-2.5 bg-slate-50 border rounded-xl text-sm font-medium">
+                          <option value="Secundaria">Plantel Secundaria</option>
+                          <option value="Primaria">Plantel Primaria</option>
+                          <option value="Preescolar">Plantel Preescolar</option>
+                          <option value="General">Plantel General / Central</option>
                         </select>
                       </div>
                     )}
 
                     <h4 className="font-bold text-xs text-slate-500 mb-2 uppercase">Lista de Selección ({carrito.length})</h4>
-                    <div className="space-y-2 max-h-48 overflow-y-auto mb-4">
+                    <div className="space-y-2 max-h-40 overflow-y-auto mb-4">
                       {carrito.map(item => (
                         <div key={item.id} className="p-2.5 bg-slate-50 rounded-xl border flex justify-between items-center text-sm">
                           <span className="font-bold truncate max-w-[180px]">{item.nombre}</span>
@@ -315,19 +381,70 @@ export default function App() {
               </div>
             )}
 
-            {/* MÓDULO HISTORIAL */}
+            {/* MÓDULO HISTORIAL CON FILTROS COMBINADOS */}
             {activeTab === 'historial' && (
               <div className="p-6 overflow-y-auto flex-1">
-                <h2 className="text-2xl font-bold mb-4">Bitácora de Movimientos (Supabase)</h2>
+                <h2 className="text-2xl font-bold mb-4">Bitácora de Movimientos</h2>
+
+                {/* Barra de Filtros Combinables */}
+                <div className="bg-white p-4 rounded-2xl border border-slate-200 mb-6 grid grid-cols-3 gap-4 shadow-sm">
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 block mb-1">Tipo de Movimiento</label>
+                    <select 
+                      value={filterTipo} 
+                      onChange={(e) => setFilterTipo(e.target.value)}
+                      className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold">
+                      <option value="todos">Todos los tipos</option>
+                      <option value="salida">Salidas</option>
+                      <option value="traspaso">Traspasos</option>
+                      <option value="entrada">Entradas</option>
+                      <option value="ajuste">Ajustes</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 block mb-1">Filtrar por Producto</label>
+                    <select 
+                      value={filterProducto} 
+                      onChange={(e) => setFilterProducto(e.target.value)}
+                      className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold">
+                      <option value="todos">Todos los productos</option>
+                      {productos.map(p => <option key={p.id} value={p.nombre}>{p.nombre}</option>)}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 block mb-1">Filtrar por Receptor / Empleado</label>
+                    <select 
+                      value={filterResponsable} 
+                      onChange={(e) => setFilterResponsable(e.target.value)}
+                      className="w-full p-2 bg-slate-50 border rounded-xl text-xs font-semibold">
+                      <option value="todos">Todos los empleados</option>
+                      {personal.map(e => <option key={e.id} value={e.nombre}>{e.nombre}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Lista de Registros Coincidentes */}
                 <div className="bg-white rounded-2xl border divide-y shadow-sm">
-                  {historialMovimientos.length === 0 ? (
-                    <div className="p-8 text-center text-slate-400 text-sm">Aún no hay registros en la base de datos.</div>
+                  {filteredMovimientos.length === 0 ? (
+                    <div className="p-8 text-center text-slate-400 text-sm">No se encontraron movimientos con los filtros seleccionados.</div>
                   ) : (
-                    historialMovimientos.map(h => (
-                      <div key={h.id} className="p-4 flex justify-between items-center">
+                    filteredMovimientos.map(h => (
+                      <div key={h.id} className="p-4 flex justify-between items-center hover:bg-slate-50">
                         <div>
-                          <h4 className="font-bold text-sm uppercase text-slate-700">{h.tipo} - {h.responsable}</h4>
-                          <p className="text-xs text-slate-500">{h.detalles} • {new Date(h.created_at).toLocaleString()}</p>
+                          <div className="flex gap-2 items-center mb-1">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase ${
+                              h.tipo === 'entrada' ? 'bg-green-100 text-green-700' :
+                              h.tipo === 'salida' ? 'bg-blue-100 text-blue-700' :
+                              h.tipo === 'traspaso' ? 'bg-purple-100 text-purple-700' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {h.tipo}
+                            </span>
+                            <span className="font-bold text-xs text-slate-800">{h.responsable}</span>
+                          </div>
+                          <p className="text-xs text-slate-600 font-medium">{h.detalles}</p>
+                          <span className="text-[10px] text-slate-400 block mt-1">{new Date(h.created_at).toLocaleString()}</span>
                         </div>
                         <span className="text-xs font-bold bg-slate-100 px-3 py-1 rounded-full border">{h.items_count} ítems</span>
                       </div>
