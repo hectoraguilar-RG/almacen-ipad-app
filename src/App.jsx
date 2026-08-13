@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { Package, ArrowDownLeft, ArrowUpRight, RefreshCw, Search, Filter, AlertTriangle, Layers, UserCheck, Edit, Camera, Trash2, CheckCircle2, Plus, Users, UserPlus, X } from 'lucide-react';
+import { Package, ArrowDownLeft, ArrowUpRight, RefreshCw, Search, Filter, AlertTriangle, Layers, UserCheck, Edit, Camera, Trash2, CheckCircle2, Plus, Users, UserPlus, X, Scan } from 'lucide-react';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('catalogo');
@@ -9,14 +10,16 @@ export default function App() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('Todas');
 
-  // Modales de Administración
+  // Modales
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [showPersonalModal, setShowPersonalModal] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
 
-  // Estados de formularios para nuevos registros
+  // Estados para formularios
   const [newProduct, setNewProduct] = useState({
     codigo: '', nombre: '', cat: 'Limpieza', unidad: 'Pza', stock: 0, min: 5, sku: ''
   });
+  const [customCatInput, setCustomCatInput] = useState('');
 
   const [newEmployee, setNewEmployee] = useState({
     id_empleado: '', nombre: '', departamento: 'Limpieza', plantel: 'Secundaria'
@@ -27,13 +30,13 @@ export default function App() {
   const [filterProducto, setFilterProducto] = useState('todos');
   const [filterResponsable, setFilterResponsable] = useState('todos');
 
-  // Estados desde Supabase
+  // Datos desde Supabase
   const [productos, setProductos] = useState([]);
   const [personal, setPersonal] = useState([]);
   const [historialMovimientos, setHistorialMovimientos] = useState([]);
   const [cargando, setCargando] = useState(true);
 
-  // Estados para transacción de Movimientos
+  // Transacción Movimientos
   const [tipoMovimiento, setTipoMovimiento] = useState('salida');
   const [empleadoSeleccionado, setEmpleadoSeleccionado] = useState('');
   const [plantelDestino, setPlantelDestino] = useState('Secundaria');
@@ -52,11 +55,11 @@ export default function App() {
     if (dataProds) {
       const prodsFormatted = dataProds.map(p => ({
         id: p.id,
-        codigo: p.codigo || p.Código || '000',
+        codigo: String(p.codigo || p.Código || '000'),
         nombre: p.nombre || p['Nombre del Producto'] || 'Sin nombre',
         stock: p.stock ?? p['Stock Inicial'] ?? 0,
         min: p.min ?? p['Stock Minimo'] ?? 5,
-        sku: p.sku || p.SKU || '',
+        sku: String(p.sku || p.SKU || ''),
         cat: p.cat || p.Categoria || p.Categoría || 'Limpieza',
         unidad: p.unidad || p.Unidad || 'Pza'
       }));
@@ -76,23 +79,77 @@ export default function App() {
   };
 
   const categoriasUnicas = ['Todas', ...new Set(productos.map(p => p.cat).filter(Boolean))];
+  const listaCategoriasForm = [...new Set(productos.map(p => p.cat).filter(Boolean))];
 
-  // AGREGAR Y ELIMINAR PRODUCTOS
+  // Cálculo de código consecutivo automático (ej. 0309 -> 0310)
+  const abrirModalNuevoProducto = () => {
+    let siguienteCodigo = '0001';
+    if (productos.length > 0) {
+      const codigosNum = productos.map(p => {
+        const parsed = parseInt(p.codigo, 10);
+        return isNaN(parsed) ? 0 : parsed;
+      });
+      const maxCod = Math.max(...codigosNum, 0);
+      const nextNum = maxCod + 1;
+      
+      // Preservar longitud con ceros a la izquierda (ej. 4 dígitos)
+      const lastStr = productos[productos.length - 1]?.codigo || '0000';
+      const len = lastStr.length > 1 ? lastStr.length : 4;
+      siguienteCodigo = String(nextNum).padStart(len, '0');
+    }
+
+    setNewProduct({
+      codigo: siguienteCodigo,
+      nombre: '',
+      cat: listaCategoriasForm[0] || 'Limpieza',
+      unidad: 'Pza',
+      stock: 0,
+      min: 5,
+      sku: ''
+    });
+    setCustomCatInput('');
+    setShowAddProductModal(true);
+  };
+
+  // Inicializar Escáner de Código de Barras
+  useEffect(() => {
+    let scanner = null;
+    if (showScanner) {
+      scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 150 } }, false);
+      scanner.render((decodedText) => {
+        setNewProduct(prev => ({ ...prev, sku: decodedText }));
+        setShowScanner(false);
+        scanner.clear();
+      }, (error) => {});
+    }
+    return () => {
+      if (scanner) {
+        scanner.clear().catch(err => console.error(err));
+      }
+    };
+  }, [showScanner]);
+
   const handleCreateProduct = async (e) => {
     e.preventDefault();
-    if (!newProduct.nombre || !newProduct.codigo) return alert('Completa el nombre y el código del producto');
+    if (!newProduct.nombre || !newProduct.codigo) return alert('Completa el nombre y el código');
 
-    const { error } = await supabase.from('productos').insert([newProduct]);
-    if (error) return alert('Error al crear el producto: ' + error.message);
+    const categoriaFinal = newProduct.cat === 'NUEVA' ? customCatInput : newProduct.cat;
 
-    alert('¡Producto creado exitosamente!');
-    setNewProduct({ codigo: '', nombre: '', cat: 'Limpieza', unidad: 'Pza', stock: 0, min: 5, sku: '' });
+    const productoAGuardar = {
+      ...newProduct,
+      cat: categoriaFinal || 'Limpieza'
+    };
+
+    const { error } = await supabase.from('productos').insert([productoAGuardar]);
+    if (error) return alert('Error al crear producto: ' + error.message);
+
+    alert('¡Producto registrado correctamente!');
     setShowAddProductModal(false);
     fetchDatos();
   };
 
   const handleDeleteProduct = async (id, nombre) => {
-    if (confirm(`¿Estás seguro de dar de baja el producto "${nombre}"?`)) {
+    if (confirm(`¿Estás seguro de dar de baja "${nombre}"?`)) {
       const { error } = await supabase.from('productos').delete().eq('id', id);
       if (error) return alert('Error al eliminar: ' + error.message);
       
@@ -102,21 +159,20 @@ export default function App() {
     }
   };
 
-  // AGREGAR Y ELIMINAR PERSONAL
   const handleCreateEmployee = async (e) => {
     e.preventDefault();
-    if (!newEmployee.nombre || !newEmployee.id_empleado) return alert('Completa el ID y el Nombre del colaborador');
+    if (!newEmployee.nombre || !newEmployee.id_empleado) return alert('Completa el ID y el Nombre');
 
     const { error } = await supabase.from('personal').insert([newEmployee]);
     if (error) return alert('Error al agregar personal: ' + error.message);
 
-    alert('¡Colaborador agregado exitosamente!');
+    alert('¡Colaborador registrado exitosamente!');
     setNewEmployee({ id_empleado: '', nombre: '', departamento: 'Limpieza', plantel: 'Secundaria' });
     fetchDatos();
   };
 
   const handleDeleteEmployee = async (id, nombre) => {
-    if (confirm(`¿Estás seguro de eliminar a "${nombre}" de la lista de personal?`)) {
+    if (confirm(`¿Estás seguro de eliminar a "${nombre}"?`)) {
       const { error } = await supabase.from('personal').delete().eq('id', id);
       if (error) return alert('Error al eliminar personal: ' + error.message);
       fetchDatos();
@@ -235,7 +291,7 @@ export default function App() {
           <div className="mt-8 border-t border-slate-800 pt-4 space-y-2">
             <span className="text-[10px] uppercase font-bold text-slate-500 block px-1">Administración</span>
             <button 
-              onClick={() => setShowAddProductModal(true)}
+              onClick={abrirModalNuevoProducto}
               className="w-full text-left px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-2 border border-slate-700">
               <Plus size={16} className="text-blue-400" /> Nuevo Producto
             </button>
@@ -291,7 +347,7 @@ export default function App() {
                     ))}
                   </div>
                   <button 
-                    onClick={() => setShowAddProductModal(true)}
+                    onClick={abrirModalNuevoProducto}
                     className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md">
                     <Plus size={16} /> Agregar Producto
                   </button>
@@ -525,44 +581,70 @@ export default function App() {
         )}
       </main>
 
-      {/* MODAL CREAR NUEVO PRODUCTO */}
+      {/* MODAL CREAR NUEVO PRODUCTO CON CÓDIGO AUTOMÁTICO Y ESCÁNER */}
       {showAddProductModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <form onSubmit={handleCreateProduct} className="bg-white rounded-2xl p-6 w-[450px] shadow-2xl border space-y-4">
+          <form onSubmit={handleCreateProduct} className="bg-white rounded-2xl p-6 w-[480px] shadow-2xl border space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-lg text-slate-900 flex items-center gap-2"><Plus className="text-blue-600"/> Alta de Nuevo Producto</h3>
-              <button type="button" onClick={() => setShowAddProductModal(false)}><X size={20} className="text-slate-400"/></button>
+              <button type="button" onClick={() => { setShowAddProductModal(false); setShowScanner(false); }}><X size={20} className="text-slate-400"/></button>
             </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1">Código Interno *</label>
-                <input type="text" placeholder="Ej. 0025" value={newProduct.codigo} onChange={e => setNewProduct({...newProduct, codigo: e.target.value})} className="w-full p-2 border rounded-xl text-sm" required />
+                <label className="text-xs font-bold text-slate-600 block mb-1">Código Interno (Auto)</label>
+                <input type="text" value={newProduct.codigo} onChange={e => setNewProduct({...newProduct, codigo: e.target.value})} className="w-full p-2 bg-slate-100 border rounded-xl text-sm font-mono font-bold text-blue-600" required />
               </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1">SKU / Código de Barras</label>
-                <input type="text" placeholder="Ej. 7501032..." value={newProduct.sku} onChange={e => setNewProduct({...newProduct, sku: e.target.value})} className="w-full p-2 border rounded-xl text-sm" />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-600 block mb-1">Nombre del Producto *</label>
-              <input type="text" placeholder="Ej. Jabón Líquido Manos" value={newProduct.nombre} onChange={e => setNewProduct({...newProduct, nombre: e.target.value})} className="w-full p-2 border rounded-xl text-sm" required />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
+
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1">Categoría</label>
-                <input type="text" placeholder="Limpieza / Papelería" value={newProduct.cat} onChange={e => setNewProduct({...newProduct, cat: e.target.value})} className="w-full p-2 border rounded-xl text-sm" />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-600 block mb-1">Unidad de Medida</label>
-                <select value={newProduct.unidad} onChange={e => setNewProduct({...newProduct, unidad: e.target.value})} className="w-full p-2 border rounded-xl text-sm">
-                  <option value="Pza">Pieza (Pza)</option>
-                  <option value="Lt">Litro (Lt)</option>
-                  <option value="Kg">Kilogramo (Kg)</option>
-                  <option value="Caja">Caja</option>
+                <select value={newProduct.cat} onChange={e => setNewProduct({...newProduct, cat: e.target.value})} className="w-full p-2 border rounded-xl text-sm">
+                  {listaCategoriasForm.map(c => <option key={c} value={c}>{c}</option>)}
+                  <option value="NUEVA">+ Nueva Categoría...</option>
                 </select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+
+            {newProduct.cat === 'NUEVA' && (
+              <div>
+                <label className="text-xs font-bold text-blue-600 block mb-1">Escribe la Nueva Categoría:</label>
+                <input type="text" placeholder="Ej. Ferretería" value={customCatInput} onChange={e => setCustomCatInput(e.target.value)} className="w-full p-2 border border-blue-400 rounded-xl text-sm" required />
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1">Nombre del Producto *</label>
+              <input type="text" placeholder="Ej. Jabón Líquido Manos 1Lt" value={newProduct.nombre} onChange={e => setNewProduct({...newProduct, nombre: e.target.value})} className="w-full p-2 border rounded-xl text-sm" required />
+            </div>
+
+            {/* SKU con Escritura + Escáner */}
+            <div>
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-xs font-bold text-slate-600">SKU / Código de Barras (Manual o Cámara)</label>
+                <button type="button" onClick={() => setShowScanner(!showScanner)} className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
+                  <Scan size={14} /> {showScanner ? 'Cerrar Cámara' : 'Escanear'}
+                </button>
+              </div>
+
+              {showScanner && (
+                <div className="mb-3 p-2 bg-slate-50 border rounded-xl">
+                  <div id="reader" className="w-full rounded-lg overflow-hidden"></div>
+                </div>
+              )}
+
+              <input type="text" placeholder="Ej. 750103290... o MT006" value={newProduct.sku} onChange={e => setNewProduct({...newProduct, sku: e.target.value})} className="w-full p-2 border rounded-xl text-sm font-mono" />
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs font-bold text-slate-600 block mb-1">Unidad</label>
+                <select value={newProduct.unidad} onChange={e => setNewProduct({...newProduct, unidad: e.target.value})} className="w-full p-2 border rounded-xl text-sm">
+                  <option value="Pza">Pza</option>
+                  <option value="Lt">Lt</option>
+                  <option value="Kg">Kg</option>
+                  <option value="Caja">Caja</option>
+                </select>
+              </div>
               <div>
                 <label className="text-xs font-bold text-slate-600 block mb-1">Stock Inicial</label>
                 <input type="number" value={newProduct.stock} onChange={e => setNewProduct({...newProduct, stock: parseInt(e.target.value) || 0})} className="w-full p-2 border rounded-xl text-sm" />
@@ -572,15 +654,16 @@ export default function App() {
                 <input type="number" value={newProduct.min} onChange={e => setNewProduct({...newProduct, min: parseInt(e.target.value) || 5})} className="w-full p-2 border rounded-xl text-sm" />
               </div>
             </div>
+
             <div className="flex gap-2 pt-2">
-              <button type="button" onClick={() => setShowAddProductModal(false)} className="w-1/2 py-2.5 border rounded-xl font-bold text-xs">Cancelar</button>
+              <button type="button" onClick={() => { setShowAddProductModal(false); setShowScanner(false); }} className="w-1/2 py-2.5 border rounded-xl font-bold text-xs">Cancelar</button>
               <button type="submit" className="w-1/2 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-xs hover:bg-blue-700">Guardar en Supabase</button>
             </div>
           </form>
         </div>
       )}
 
-      {/* MODAL ADMINISTRAR PERSONAL */}
+      {/* MODAL ADMINISTRAR PERSONAL CON DEPARTAMENTO DE 2 OPCIONES */}
       {showPersonalModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-6 w-[550px] shadow-2xl border space-y-4 max-h-[85vh] flex flex-col justify-between">
@@ -590,28 +673,35 @@ export default function App() {
                 <button type="button" onClick={() => setShowPersonalModal(false)}><X size={20} className="text-slate-400"/></button>
               </div>
 
-              {/* Formulario Agregar */}
-              <form onSubmit={handleCreateEmployee} className="bg-slate-50 p-3 rounded-xl border space-y-3 mb-4">
+              <form onSubmit={handleCreateEmployee} className="bg-slate-50 p-3.5 rounded-xl border space-y-3 mb-4">
                 <span className="text-xs font-bold text-slate-700 flex items-center gap-1"><UserPlus size={14}/> Registrar Nuevo Colaborador</span>
                 <div className="grid grid-cols-2 gap-2">
                   <input type="text" placeholder="ID Empleado (Ej. 0080)" value={newEmployee.id_empleado} onChange={e => setNewEmployee({...newEmployee, id_empleado: e.target.value})} className="p-2 border rounded-lg text-xs" required />
                   <input type="text" placeholder="Nombre Completo" value={newEmployee.nombre} onChange={e => setNewEmployee({...newEmployee, nombre: e.target.value})} className="p-2 border rounded-lg text-xs" required />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <input type="text" placeholder="Departamento" value={newEmployee.departamento} onChange={e => setNewEmployee({...newEmployee, departamento: e.target.value})} className="p-2 border rounded-lg text-xs" />
-                  <input type="text" placeholder="Plantel" value={newEmployee.plantel} onChange={e => setNewEmployee({...newEmployee, plantel: e.target.value})} className="p-2 border rounded-lg text-xs" />
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Departamento</label>
+                    <select value={newEmployee.departamento} onChange={e => setNewEmployee({...newEmployee, departamento: e.target.value})} className="w-full p-2 border rounded-lg text-xs font-medium">
+                      <option value="Limpieza">Limpieza</option>
+                      <option value="Técnico">Técnico</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 block mb-0.5">Plantel</label>
+                    <input type="text" placeholder="Plantel (Ej. Secundaria)" value={newEmployee.plantel} onChange={e => setNewEmployee({...newEmployee, plantel: e.target.value})} className="p-2 border rounded-lg text-xs mt-0.5" />
+                  </div>
                 </div>
                 <button type="submit" className="w-full py-2 bg-purple-600 text-white rounded-lg font-bold text-xs hover:bg-purple-700">+ Guardar Colaborador</button>
               </form>
 
-              {/* Lista Personal */}
               <h4 className="font-bold text-xs text-slate-500 uppercase mb-2">Personal Registrado ({personal.length})</h4>
               <div className="space-y-2 overflow-y-auto max-h-44 pr-1">
                 {personal.map(e => (
                   <div key={e.id} className="p-2.5 bg-white border rounded-xl flex justify-between items-center text-xs">
                     <div>
                       <p className="font-bold text-slate-800">{e.nombre}</p>
-                      <span className="text-slate-400 text-[10px]">ID: {e.id_empleado} • {e.departamento || e.plantel}</span>
+                      <span className="text-slate-400 text-[10px]">ID: {e.id_empleado} • Depto: {e.departamento} ({e.plantel})</span>
                     </div>
                     <button onClick={() => handleDeleteEmployee(e.id, e.nombre)} className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg"><Trash2 size={14}/></button>
                   </div>
