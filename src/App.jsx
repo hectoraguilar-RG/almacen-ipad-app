@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { Package, ArrowDownLeft, ArrowUpRight, RefreshCw, Search, Filter, AlertTriangle, Layers, UserCheck, Edit, Camera, Trash2, CheckCircle2, Plus, Users, UserPlus, X, Scan } from 'lucide-react';
+import { Package, ArrowDownLeft, ArrowUpRight, RefreshCw, Search, Filter, AlertTriangle, Layers, UserCheck, Edit, Camera, Trash2, CheckCircle2, Plus, Users, UserPlus, X, Scan, Menu, ChevronLeft, Image as ImageIcon } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('catalogo');
+  const [sidebarOpen, setSidebarOpen] = useState(true); // Control de barra lateral colapsable
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [editingProduct, setEditingProduct] = useState(null);
@@ -17,7 +18,7 @@ export default function App() {
 
   // Estados para formularios
   const [newProduct, setNewProduct] = useState({
-    codigo: '', nombre: '', cat: 'Limpieza', unidad: 'Pza', stock: 0, min: 5, sku: ''
+    codigo: '', nombre: '', cat: 'Limpieza', unidad: 'Pza', stock: 0, min: 5, sku: '', foto_url: ''
   });
   const [customCatInput, setCustomCatInput] = useState('');
 
@@ -61,7 +62,8 @@ export default function App() {
         min: p.min ?? p['Stock Minimo'] ?? 5,
         sku: String(p.sku || p.SKU || ''),
         cat: p.cat || p.Categoria || p.Categoría || 'Limpieza',
-        unidad: p.unidad || p.Unidad || 'Pza'
+        unidad: p.unidad || p.Unidad || 'Pza',
+        foto_url: p.foto_url || p['Foto URL'] || ''
       }));
       setProductos(prodsFormatted);
       if (prodsFormatted.length > 0 && !selectedProduct) setSelectedProduct(prodsFormatted[0]);
@@ -81,7 +83,18 @@ export default function App() {
   const categoriasUnicas = ['Todas', ...new Set(productos.map(p => p.cat).filter(Boolean))];
   const listaCategoriasForm = [...new Set(productos.map(p => p.cat).filter(Boolean))];
 
-  // Cálculo de código consecutivo automático (ej. 0309 -> 0310)
+  // Convertir imagen a Base64 para almacenar foto en Supabase
+  const handleImageUpload = (e, setTarget) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setTarget(prev => ({ ...prev, foto_url: reader.result }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const abrirModalNuevoProducto = () => {
     let siguienteCodigo = '0001';
     if (productos.length > 0) {
@@ -91,8 +104,6 @@ export default function App() {
       });
       const maxCod = Math.max(...codigosNum, 0);
       const nextNum = maxCod + 1;
-      
-      // Preservar longitud con ceros a la izquierda (ej. 4 dígitos)
       const lastStr = productos[productos.length - 1]?.codigo || '0000';
       const len = lastStr.length > 1 ? lastStr.length : 4;
       siguienteCodigo = String(nextNum).padStart(len, '0');
@@ -105,13 +116,14 @@ export default function App() {
       unidad: 'Pza',
       stock: 0,
       min: 5,
-      sku: ''
+      sku: '',
+      foto_url: ''
     });
     setCustomCatInput('');
     setShowAddProductModal(true);
   };
 
-  // Inicializar Escáner de Código de Barras
+  // Escáner de Código de Barras
   useEffect(() => {
     let scanner = null;
     if (showScanner) {
@@ -134,7 +146,6 @@ export default function App() {
     if (!newProduct.nombre || !newProduct.codigo) return alert('Completa el nombre y el código');
 
     const categoriaFinal = newProduct.cat === 'NUEVA' ? customCatInput : newProduct.cat;
-
     const productoAGuardar = {
       ...newProduct,
       cat: categoriaFinal || 'Limpieza'
@@ -232,7 +243,8 @@ export default function App() {
         nombre: editingProduct.nombre,
         stock: editingProduct.stock,
         min: editingProduct.min,
-        cat: editingProduct.cat
+        cat: editingProduct.cat,
+        foto_url: editingProduct.foto_url
       })
       .eq('id', editingProduct.id);
 
@@ -257,48 +269,57 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-100 font-sans text-slate-800">
-      {/* Sidebar Navigation */}
-      <aside className="w-72 bg-slate-900 text-white flex flex-col p-6 justify-between shadow-xl">
+      {/* Sidebar Navigation Colapsable */}
+      <aside className={`${sidebarOpen ? 'w-72 p-6' : 'w-20 p-4'} bg-slate-900 text-white flex flex-col justify-between shadow-xl transition-all duration-300 relative z-20`}>
         <div>
-          <div className="flex items-center gap-3 mb-8">
-            <div className="bg-blue-600 p-2.5 rounded-xl shadow-lg shadow-blue-600/30">
-              <Package className="text-white" size={24} />
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-3">
+              <div className="bg-blue-600 p-2.5 rounded-xl shadow-lg shadow-blue-600/30">
+                <Package className="text-white" size={24} />
+              </div>
+              {sidebarOpen && (
+                <div>
+                  <h1 className="text-lg font-bold leading-none">Almacén iPad</h1>
+                  <span className="text-xs text-green-400 font-semibold">● En línea</span>
+                </div>
+              )}
             </div>
-            <div>
-              <h1 className="text-lg font-bold leading-none">Almacén iPad</h1>
-              <span className="text-xs text-green-400 font-semibold">● En línea (Supabase)</span>
-            </div>
+            <button 
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:bg-slate-700">
+              {sidebarOpen ? <ChevronLeft size={18} /> : <Menu size={18} />}
+            </button>
           </div>
 
           <nav className="space-y-2">
             <button 
               onClick={() => setActiveTab('catalogo')}
-              className={`w-full text-left px-4 py-3 rounded-xl font-medium flex items-center gap-3 transition ${activeTab === 'catalogo' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-              <Layers size={20} /> Catálogo ({productos.length})
+              className={`w-full text-left p-3 rounded-xl font-medium flex items-center gap-3 transition ${activeTab === 'catalogo' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+              <Layers size={20} /> {sidebarOpen && `Catálogo (${productos.length})`}
             </button>
             <button 
               onClick={() => setActiveTab('movimiento')}
-              className={`w-full text-left px-4 py-3 rounded-xl font-medium flex items-center gap-3 transition ${activeTab === 'movimiento' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-              <ArrowUpRight size={20} /> Entradas / Salidas
+              className={`w-full text-left p-3 rounded-xl font-medium flex items-center gap-3 transition ${activeTab === 'movimiento' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+              <ArrowUpRight size={20} /> {sidebarOpen && 'Entradas / Salidas'}
             </button>
             <button 
               onClick={() => setActiveTab('historial')}
-              className={`w-full text-left px-4 py-3 rounded-xl font-medium flex items-center gap-3 transition ${activeTab === 'historial' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-              <Filter size={20} /> Historial Filtrable
+              className={`w-full text-left p-3 rounded-xl font-medium flex items-center gap-3 transition ${activeTab === 'historial' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+              <Filter size={20} /> {sidebarOpen && 'Historial Filtrable'}
             </button>
           </nav>
 
           <div className="mt-8 border-t border-slate-800 pt-4 space-y-2">
-            <span className="text-[10px] uppercase font-bold text-slate-500 block px-1">Administración</span>
+            {sidebarOpen && <span className="text-[10px] uppercase font-bold text-slate-500 block px-1">Administración</span>}
             <button 
               onClick={abrirModalNuevoProducto}
-              className="w-full text-left px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-2 border border-slate-700">
-              <Plus size={16} className="text-blue-400" /> Nuevo Producto
+              className="w-full text-left p-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-2 border border-slate-700">
+              <Plus size={16} className="text-blue-400" /> {sidebarOpen && 'Nuevo Producto'}
             </button>
             <button 
               onClick={() => setShowPersonalModal(true)}
-              className="w-full text-left px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-2 border border-slate-700">
-              <Users size={16} className="text-purple-400" /> Administrar Personal
+              className="w-full text-left p-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 flex items-center gap-2 border border-slate-700">
+              <Users size={16} className="text-purple-400" /> {sidebarOpen && 'Administrar Personal'}
             </button>
           </div>
         </div>
@@ -306,22 +327,29 @@ export default function App() {
         <button 
           onClick={fetchDatos}
           className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition flex items-center justify-center gap-2">
-          <RefreshCw size={14} /> Sincronizar Datos
+          <RefreshCw size={14} /> {sidebarOpen && 'Sincronizar Datos'}
         </button>
       </aside>
 
       {/* Main Container */}
       <main className="flex-1 overflow-hidden flex flex-col">
         <header className="bg-white border-b border-slate-200 px-8 py-4 flex justify-between items-center">
-          <div className="relative w-96">
-            <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
-            <input 
-              type="text" 
-              placeholder="Buscar por Nombre, SKU o Código..." 
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+          <div className="flex items-center gap-4">
+            {!sidebarOpen && (
+              <button onClick={() => setSidebarOpen(true)} className="p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200">
+                <Menu size={20} />
+              </button>
+            )}
+            <div className="relative w-96">
+              <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
+              <input 
+                type="text" 
+                placeholder="Buscar por Nombre, SKU o Código..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
           </div>
           <div className="flex items-center gap-2 text-xs font-semibold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-lg border">
             <UserCheck size={16} className="text-green-600" /> Operador / Supervisor
@@ -361,13 +389,22 @@ export default function App() {
                         key={p.id} 
                         onClick={() => setSelectedProduct(p)}
                         className={`p-4 rounded-2xl bg-white border transition cursor-pointer flex justify-between items-center ${selectedProduct?.id === p.id ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-md' : 'border-slate-200 hover:border-slate-300'}`}>
-                        <div>
-                          <div className="flex gap-2 items-center">
-                            <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">Cód: {p.codigo}</span>
-                            <span className="text-[10px] font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">SKU: {p.sku}</span>
+                        <div className="flex items-center gap-3">
+                          {p.foto_url ? (
+                            <img src={p.foto_url} alt={p.nombre} className="w-12 h-12 object-cover rounded-xl border" />
+                          ) : (
+                            <div className="w-12 h-12 bg-slate-100 rounded-xl border flex items-center justify-center text-slate-400">
+                              <ImageIcon size={20} />
+                            </div>
+                          )}
+                          <div>
+                            <div className="flex gap-2 items-center">
+                              <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">Cód: {p.codigo}</span>
+                              <span className="text-[10px] font-mono font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">SKU: {p.sku}</span>
+                            </div>
+                            <h3 className="font-bold text-slate-800 mt-1">{p.nombre}</h3>
+                            <span className="text-xs text-slate-400">{p.cat} • {p.unidad}</span>
                           </div>
-                          <h3 className="font-bold text-slate-800 mt-1.5">{p.nombre}</h3>
-                          <span className="text-xs text-slate-400">{p.cat} • {p.unidad}</span>
                         </div>
                         <div className="text-right">
                           <span className={`text-xl font-black ${p.stock <= p.min ? 'text-red-500' : 'text-slate-800'}`}>
@@ -383,7 +420,7 @@ export default function App() {
                     ))}
                   </div>
 
-                  {/* Ficha Detalle */}
+                  {/* Ficha Detalle con Muestreo de Fotografía Real */}
                   <div className="w-1/2 bg-white rounded-2xl border border-slate-200 p-6 flex flex-col justify-between shadow-sm overflow-y-auto">
                     {selectedProduct ? (
                       <div>
@@ -412,10 +449,18 @@ export default function App() {
 
                         <div className="mb-6">
                           <h4 className="font-bold text-sm text-slate-700 mb-2">Fotografía del Producto</h4>
-                          <div className="w-full h-36 bg-slate-50 rounded-xl border border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 gap-2">
-                            <Camera size={24} />
-                            <span className="text-xs">Evidencia fotográfica en Supabase</span>
-                          </div>
+                          {selectedProduct.foto_url ? (
+                            <div className="relative group">
+                              <img src={selectedProduct.foto_url} alt={selectedProduct.nombre} className="w-full h-48 object-contain rounded-xl border bg-slate-50 p-2" />
+                            </div>
+                          ) : (
+                            <div 
+                              onClick={() => setEditingProduct(selectedProduct)}
+                              className="w-full h-36 bg-slate-50 rounded-xl border border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 gap-2 cursor-pointer hover:bg-slate-100">
+                              <Camera size={24} />
+                              <span className="text-xs font-semibold text-blue-600">+ Tomar / Subir foto en Editar</span>
+                            </div>
+                          )}
                         </div>
 
                         <div className="bg-slate-50 p-4 rounded-xl border mb-6 flex justify-around text-center">
@@ -581,7 +626,7 @@ export default function App() {
         )}
       </main>
 
-      {/* MODAL CREAR NUEVO PRODUCTO CON CÓDIGO AUTOMÁTICO Y ESCÁNER */}
+      {/* MODAL CREAR NUEVO PRODUCTO CON CÁMARA/FOTO */}
       {showAddProductModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <form onSubmit={handleCreateProduct} className="bg-white rounded-2xl p-6 w-[480px] shadow-2xl border space-y-4 max-h-[90vh] overflow-y-auto">
@@ -620,9 +665,9 @@ export default function App() {
             {/* SKU con Escritura + Escáner */}
             <div>
               <div className="flex justify-between items-center mb-1">
-                <label className="text-xs font-bold text-slate-600">SKU / Código de Barras (Manual o Cámara)</label>
+                <label className="text-xs font-bold text-slate-600">SKU / Código de Barras</label>
                 <button type="button" onClick={() => setShowScanner(!showScanner)} className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
-                  <Scan size={14} /> {showScanner ? 'Cerrar Cámara' : 'Escanear'}
+                  <Scan size={14} /> {showScanner ? 'Cerrar' : 'Escanear'}
                 </button>
               </div>
 
@@ -633,6 +678,20 @@ export default function App() {
               )}
 
               <input type="text" placeholder="Ej. 750103290... o MT006" value={newProduct.sku} onChange={e => setNewProduct({...newProduct, sku: e.target.value})} className="w-full p-2 border rounded-xl text-sm font-mono" />
+            </div>
+
+            {/* Fotografía en Nuevo Producto */}
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1">Fotografía del Producto</label>
+              <div className="flex items-center gap-3">
+                {newProduct.foto_url && (
+                  <img src={newProduct.foto_url} alt="Vista previa" className="w-14 h-14 object-cover rounded-xl border" />
+                )}
+                <label className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 border rounded-xl text-xs font-bold text-slate-700 cursor-pointer text-center flex items-center justify-center gap-2">
+                  <Camera size={16} /> {newProduct.foto_url ? 'Cambiar Foto' : 'Tomar / Subir Foto'}
+                  <input type="file" accept="image/*" capture="environment" onChange={e => handleImageUpload(e, setNewProduct)} className="hidden" />
+                </label>
+              </div>
             </div>
 
             <div className="grid grid-cols-3 gap-3">
@@ -663,7 +722,62 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL ADMINISTRAR PERSONAL CON DEPARTAMENTO DE 2 OPCIONES */}
+      {/* MODAL EDITAR PRODUCTO CON FOTO REAL */}
+      {editingProduct && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <form onSubmit={guardarEdicionProducto} className="bg-white rounded-2xl p-6 w-[420px] shadow-2xl border space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="font-bold text-lg">Editar Producto</h3>
+
+            {/* Carga de Foto en Editar */}
+            <div>
+              <label className="text-xs font-bold text-slate-600 block mb-1">Fotografía del Producto</label>
+              <div className="flex items-center gap-3">
+                {editingProduct.foto_url ? (
+                  <img src={editingProduct.foto_url} alt="Vista previa" className="w-16 h-16 object-cover rounded-xl border" />
+                ) : (
+                  <div className="w-16 h-16 bg-slate-100 rounded-xl border flex items-center justify-center text-slate-400">
+                    <ImageIcon size={24} />
+                  </div>
+                )}
+                <label className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 border rounded-xl text-xs font-bold text-slate-700 cursor-pointer text-center flex items-center justify-center gap-2">
+                  <Camera size={16} /> {editingProduct.foto_url ? 'Cambiar Foto' : 'Tomar / Subir Foto'}
+                  <input type="file" accept="image/*" capture="environment" onChange={e => handleImageUpload(e, setEditingProduct)} className="hidden" />
+                </label>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-500 block mb-1">Nombre</label>
+              <input type="text" value={editingProduct.nombre} onChange={e => setEditingProduct({...editingProduct, nombre: e.target.value})} className="w-full p-2 border rounded-xl text-sm" />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-500 block mb-1">Categoría</label>
+              <select value={editingProduct.cat} onChange={e => setEditingProduct({...editingProduct, cat: e.target.value})} className="w-full p-2 border rounded-xl text-sm">
+                {listaCategoriasForm.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-bold text-slate-500 block mb-1">Stock Actual</label>
+                <input type="number" value={editingProduct.stock} onChange={e => setEditingProduct({...editingProduct, stock: parseInt(e.target.value) || 0})} className="w-full p-2 border rounded-xl text-sm" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 block mb-1">Stock Mínimo</label>
+                <input type="number" value={editingProduct.min} onChange={e => setEditingProduct({...editingProduct, min: parseInt(e.target.value) || 0})} className="w-full p-2 border rounded-xl text-sm" />
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-2">
+              <button type="button" onClick={() => setEditingProduct(null)} className="w-1/2 py-2 border rounded-xl font-bold text-xs">Cancelar</button>
+              <button type="submit" className="w-1/2 py-2 bg-blue-600 text-white rounded-xl font-bold text-xs">Guardar en Supabase</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* MODAL ADMINISTRAR PERSONAL */}
       {showPersonalModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl p-6 w-[550px] shadow-2xl border space-y-4 max-h-[85vh] flex flex-col justify-between">
@@ -711,33 +825,6 @@ export default function App() {
 
             <button type="button" onClick={() => setShowPersonalModal(false)} className="w-full py-2.5 border rounded-xl font-bold text-xs mt-2">Cerrar</button>
           </div>
-        </div>
-      )}
-
-      {/* MODAL EDITAR PRODUCTO */}
-      {editingProduct && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <form onSubmit={guardarEdicionProducto} className="bg-white rounded-2xl p-6 w-96 shadow-2xl border space-y-4">
-            <h3 className="font-bold text-lg">Editar Producto</h3>
-            <div>
-              <label className="text-xs font-bold text-slate-500 block mb-1">Nombre</label>
-              <input type="text" value={editingProduct.nombre} onChange={e => setEditingProduct({...editingProduct, nombre: e.target.value})} className="w-full p-2 border rounded-xl text-sm" />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-xs font-bold text-slate-500 block mb-1">Stock Actual</label>
-                <input type="number" value={editingProduct.stock} onChange={e => setEditingProduct({...editingProduct, stock: parseInt(e.target.value) || 0})} className="w-full p-2 border rounded-xl text-sm" />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-500 block mb-1">Stock Mínimo</label>
-                <input type="number" value={editingProduct.min} onChange={e => setEditingProduct({...editingProduct, min: parseInt(e.target.value) || 0})} className="w-full p-2 border rounded-xl text-sm" />
-              </div>
-            </div>
-            <div className="flex gap-2 pt-2">
-              <button type="button" onClick={() => setEditingProduct(null)} className="w-1/2 py-2 border rounded-xl font-bold text-xs">Cancelar</button>
-              <button type="submit" className="w-1/2 py-2 bg-blue-600 text-white rounded-xl font-bold text-xs">Guardar en Supabase</button>
-            </div>
-          </form>
         </div>
       )}
     </div>
